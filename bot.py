@@ -98,10 +98,7 @@ def handle_photo(update: Update, context: CallbackContext) -> None:
     user_stats.add(update.effective_user.id)
     image_count += 1
 
-    if not update.message.photo:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="🚫 Please send a valid image.")
-        return
-
+    # Get the photo file and paths
     photo_file = update.message.photo[-1].get_file()
     photo_path = f"temp/{photo_file.file_id}.jpg"
     upscaled_path = f"temp/upscaled_{photo_file.file_id}.jpg"
