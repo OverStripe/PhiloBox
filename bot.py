@@ -1,22 +1,29 @@
 import os
-import aiohttp
+import logging
 import sqlite3
+import aiohttp
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     ContextTypes,
+    CallbackQueryHandler,
     filters,
 )
 
-UPLOAD_API_URL = "https://catbox.moe/user/api.php"  # File hosting API endpoint
-TOKEN = "7252535128:AAGWthnsH9cbYnjjmqkLmlraIGeBrIdzdTA"
+# Hosting API URL
+UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
-# Database setup
+# Telegram Bot Token
+TOKEN = "7252535128:AAGNX7X9js31iR79yx42pBjbCgWIfagVA3Y"
+
+# Database file
 DB_FILE = "bot_stats.db"
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 
 
 def initialize_db():
@@ -36,11 +43,11 @@ def initialize_db():
 
 
 def update_user_stats(user_id):
-    """Update the user stats in the database."""
+    """Update user and image stats in the database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
 
-    # Update user count if it's a new user
+    # Increment user count if the user is new
     cursor.execute("SELECT user_count FROM stats WHERE id = 1")
     user_count = cursor.fetchone()[0]
     cursor.execute("SELECT DISTINCT user_id FROM users WHERE user_id = ?", (user_id,))
@@ -58,7 +65,7 @@ def update_user_stats(user_id):
 
 
 def get_stats():
-    """Retrieve the stats from the database."""
+    """Retrieve user and image stats from the database."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute("SELECT user_count, image_count FROM stats WHERE id = 1")
@@ -67,17 +74,23 @@ def get_stats():
     return stats
 
 
-# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start command handler."""
     first_name = update.effective_user.first_name or "User"
 
-    # Persistent reply keyboard
+    # Inline and reply keyboard for better UI
+    inline_keyboard = [
+        [InlineKeyboardButton("✨ Help", callback_data="help")],
+        [InlineKeyboardButton("🚀 Join Channel", url="https://t.me/TechPiroBots")],
+    ]
+    inline_markup = InlineKeyboardMarkup(inline_keyboard)
+
     reply_keyboard = [
-        [KeyboardButton("/start"), KeyboardButton("/help"), KeyboardButton("/stats")],
+        [KeyboardButton("/help"), KeyboardButton("/stats")],
     ]
     reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
+    # Welcome message
     welcome_message = (
         f"👋 <b>Welcome, {first_name}!</b>\n\n"
         f"📸 <i>Send me an image, and I’ll host it for you online!</i>\n\n"
@@ -85,20 +98,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"⚡️ <i>Let’s get started!</i>"
     )
 
-    await update.message.reply_text(
-        text=welcome_message,
-        reply_markup=reply_markup,
+    # Send the welcome image and message
+    image_url = "https://files.catbox.moe/rcazxj.jpg"
+    await update.message.reply_photo(
+        photo=image_url,
+        caption=welcome_message,
         parse_mode=ParseMode.HTML,
+        reply_markup=inline_markup,
     )
 
 
-# Help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler."""
     help_text = (
         "✨ <b>How to Use:</b>\n"
         "1️⃣ Send me an image.\n"
-        "2️⃣ I’ll upload it and provide you a shareable link.\n\n"
+        "2️⃣ I’ll upload it and provide you with a shareable link.\n\n"
         "🔗 <b>Explore:</b>\n"
         "  - <a href='https://t.me/TechPiroBots'>More Bots</a>\n\n"
         "👩‍💻 <b>Contact:</b> @Philowise"
@@ -108,9 +123,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-# Stats command
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show statistics about users and images processed."""
+    """Stats command handler to display user and image stats."""
     user_count, image_count = get_stats()
 
     stats_message = (
@@ -126,27 +140,23 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
-# Photo handler
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Auto processes and uploads photos."""
+    """Automatically process and upload user-uploaded photos."""
     user_id = update.effective_user.id
-    update_user_stats(user_id)  # Update stats for the user
+    update_user_stats(user_id)
 
     message = update.message
-    await message.reply_text(
-        text="✨ <i>Processing and uploading your image...</i>",
-        parse_mode=ParseMode.HTML,
-    )
 
-    # Get the largest available image size
+    # Step 1: Acknowledge the received image
+    await message.reply_text("📸 <i>Image received! Processing...</i>", parse_mode=ParseMode.HTML)
+
+    # Step 2: Download and upload the photo
     photo_file = await message.photo[-1].get_file()
     photo_path = f"{photo_file.file_id}.jpg"
 
     try:
-        # Download the photo
         await photo_file.download_to_drive(photo_path)
 
-        # Upload the image to the hosting API
         async with aiohttp.ClientSession() as session:
             with open(photo_path, "rb") as file:
                 data = aiohttp.FormData()
@@ -154,35 +164,34 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                 data.add_field("fileToUpload", file, filename=photo_path)
 
                 async with session.post(UPLOAD_API_URL, data=data) as response:
-                    if response.status == 200:
-                        image_url = await response.text()
-                        if image_url.startswith("https://"):
-                            await message.reply_text(
-                                text=f"✅ <b>Upload successful!</b>\n🔗 <a href='{image_url.strip()}'>Here’s your link.</a>",
-                                parse_mode=ParseMode.HTML,
-                                disable_web_page_preview=False,
-                            )
-                        else:
-                            raise Exception("Unexpected response from the hosting service.")
+                    response_text = await response.text()
+                    logging.info(f"API Response: {response_text}")
+
+                    if response.status == 200 and response_text.startswith("https://"):
+                        # Step 3: Send the URL after upload
+                        await message.reply_text(
+                            text=f"✅ <b>Upload successful!</b>\n🔗 <a href='{response_text.strip()}'>Here’s your link.</a>",
+                            parse_mode=ParseMode.HTML,
+                            disable_web_page_preview=False,
+                        )
                     else:
-                        raise Exception("Failed to upload the file.")
+                        raise Exception(f"Unexpected response: {response_text}")
 
     except Exception as e:
+        logging.error(f"Error uploading photo: {e}")
         await message.reply_text(
             text=f"❌ <b>Failed to process your image:</b> <i>{e}</i>",
             parse_mode=ParseMode.HTML,
         )
 
     finally:
-        # Clean up the downloaded photo
         if os.path.exists(photo_path):
             os.remove(photo_path)
 
 
-# Main function
 def main():
-    """Main function to start the bot."""
-    initialize_db()  # Initialize the database
+    """Main entry point to run the bot."""
+    initialize_db()
     application = ApplicationBuilder().token(TOKEN).build()
 
     # Add handlers
@@ -191,7 +200,7 @@ def main():
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
-    # Start the bot
+    # Start polling
     application.run_polling()
 
 
