@@ -1,3 +1,2 @@
 python-telegram-bot==20.5
 aiohttp==3.8.5
-sqlite3==0.0.1  # Built-in, but can be included for explicit clarity
