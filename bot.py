@@ -1,4 +1,4 @@
-# File: telegram_upscale_bot_no_api.py
+# File: bot.py
 
 import os
 import requests
@@ -6,8 +6,8 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ParseMode
 )
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -17,8 +17,8 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Free public upscaler endpoint (replace with the most stable available endpoint)
-FREE_UPSCALER_URL = "https://deepai.org/example-image-upscaling-api/image-upscale"  # Example endpoint
+# Free public upscaler endpoint (replace with a valid free endpoint if needed)
+FREE_UPSCALER_URL = "https://deepai.org/example-image-upscaling-api/image-upscale"  # Example
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
 # Global variables to track stats
@@ -153,7 +153,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Main function
 async def main() -> None:
-    TELEGRAM_BOT_TOKEN = "7252535128:AAG7M65MpDqCq9o1iAEdKf1BVqB0R67XAAM"
+    TELEGRAM_BOT_TOKEN = "7252535128:AAHDYgTVYOiuep7axsQh_Ay-lnKqUYPj6_c"
 
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
