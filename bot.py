@@ -1,30 +1,31 @@
-# File: bot.py
+# File: bot_polling.py
 
 import os
-import asyncio
 import requests
 from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    ParseMode,
 )
-from telegram.constants import ParseMode
 from telegram.ext import (
-    Application,
+    Updater,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    filters,
-    ContextTypes,
+    Filters,
+    CallbackContext,
 )
 
 FREE_UPSCALER_URL = "https://deepai.org/example-image-upscaling-api/image-upscale"
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
+# Global variables for stats
 user_stats = set()
 image_count = 0
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Start command
+def start(update: Update, context: CallbackContext) -> None:
     global user_stats
     user_stats.add(update.effective_user.id)
 
@@ -44,20 +45,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         f"👩‍💻 Developed by: @Philowise\n"
         f"⚡️ <i>Let’s get started!</i>"
     )
-    await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=welcome_message,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML,
+    )
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Help command
+def help_command(update: Update, context: CallbackContext) -> None:
     help_text = (
         "✨ <b>How to Use:</b>\n"
         "1️⃣ Send me an image.\n"
-        "2️⃣ I’ll upscale it and provide a shareable link.\n\n"
+        "2️⃣ I’ll enhance it and provide a shareable link.\n\n"
         "🔗 <b>Explore:</b>\n"
         "  - <a href='https://t.me/TechPiroBots'>More Bots</a>\n\n"
         "👩‍💻 <b>Contact:</b> @Philowise"
     )
-    await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=help_text,
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Stats command
+def stats_command(update: Update, context: CallbackContext) -> None:
     global user_stats, image_count
     stats_message = (
         f"📊 <b>Bot Statistics:</b>\n"
@@ -65,34 +78,45 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"🖼️ <b>Total Images Processed:</b> {image_count}\n\n"
         f"Keep using the bot to increase these numbers!"
     )
-    await update.message.reply_text(stats_message, parse_mode=ParseMode.HTML)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=stats_message,
+        parse_mode=ParseMode.HTML,
+    )
 
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Callback handler for inline buttons
+def button_callback(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
-    await query.answer()
+    query.answer()
 
     if query.data == "help":
-        await help_command(update, context)
+        help_command(update, context)
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+# Handler for photos
+def handle_photo(update: Update, context: CallbackContext) -> None:
     global user_stats, image_count
     user_stats.add(update.effective_user.id)
     image_count += 1
 
     if not update.message.photo:
-        await update.message.reply_text("🚫 Please send a valid image.")
+        context.bot.send_message(chat_id=update.effective_chat.id, text="🚫 Please send a valid image.")
         return
 
-    photo_file = await update.message.photo[-1].get_file()
+    photo_file = update.message.photo[-1].get_file()
     photo_path = f"temp/{photo_file.file_id}.jpg"
     upscaled_path = f"temp/upscaled_{photo_file.file_id}.jpg"
 
     os.makedirs("temp", exist_ok=True)
-    await photo_file.download_to_drive(photo_path)
+    photo_file.download(photo_path)
 
-    await update.message.reply_text("✨ <i>Processing your image...</i>", parse_mode=ParseMode.HTML)
+    context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="✨ <i>Processing your image...</i>",
+        parse_mode=ParseMode.HTML,
+    )
 
     try:
+        # Step 1: Upscale the image
         with open(photo_path, "rb") as image_file:
             response = requests.post(FREE_UPSCALER_URL, files={"image": image_file})
 
@@ -101,43 +125,64 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             with open(upscaled_path, "wb") as f:
                 f.write(requests.get(upscaled_image_url).content)
         else:
-            await update.message.reply_text("⚠️ <i>Upscaling failed. Uploading the original image.</i>", parse_mode=ParseMode.HTML)
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="⚠️ <i>Upscaling failed. Uploading the original image.</i>",
+                parse_mode=ParseMode.HTML,
+            )
             upscaled_path = photo_path
 
+        # Step 2: Upload the processed image
         with open(upscaled_path, "rb") as image_file:
-            upload_response = requests.post(UPLOAD_API_URL, data={"reqtype": "fileupload"}, files={"fileToUpload": image_file})
+            upload_response = requests.post(
+                UPLOAD_API_URL,
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": image_file},
+            )
 
         if upload_response.status_code == 200 and upload_response.text.startswith("https://"):
             image_url = upload_response.text.strip()
-            await update.message.reply_text(f"✅ <b>All done!</b>\n🔗 <a href='{image_url}'>Here’s your image link.</a>", parse_mode=ParseMode.HTML, disable_web_page_preview=False)
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"✅ <b>All done!</b>\n🔗 <a href='{image_url}'>Here’s your image link.</a>",
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=False,
+            )
         else:
-            await update.message.reply_text("❌ <b>Failed to upload the image. Please try again later.</b>", parse_mode=ParseMode.HTML)
+            context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ <b>Failed to upload the image. Please try again later.</b>",
+                parse_mode=ParseMode.HTML,
+            )
     except Exception as e:
-        await update.message.reply_text(f"❌ <b>An error occurred:</b> <i>{str(e)}</i>", parse_mode=ParseMode.HTML)
+        context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"❌ <b>An error occurred:</b> <i>{str(e)}</i>",
+            parse_mode=ParseMode.HTML,
+        )
     finally:
         if os.path.exists(photo_path):
             os.remove(photo_path)
         if os.path.exists(upscaled_path) and upscaled_path != photo_path:
             os.remove(upscaled_path)
 
-async def main() -> None:
-    TELEGRAM_BOT_TOKEN = "7252535128:AAFRMJuZgwCOrO1_zeVSGGIfgCB0I5MwpJ0"
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+# Main function
+def main() -> None:
+    TELEGRAM_BOT_TOKEN = "7252535128:AAH7JUQw0uyr4TDRMaKxmhnXf8ubzo6ZCcw"
+    updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("stats", stats_command))
-    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(CallbackQueryHandler(button_callback))
+    # Handlers
+    dispatcher.add_handler(CommandHandler("start", start))
+    dispatcher.add_handler(CommandHandler("help", help_command))
+    dispatcher.add_handler(CommandHandler("stats", stats_command))
+    dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
+    dispatcher.add_handler(CallbackQueryHandler(button_callback))
 
-    await application.initialize()
-    await application.start()
+    # Start polling
+    updater.start_polling()
     print("Bot is running...")
-    await application.updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    if not loop.is_running():
-        loop.run_until_complete(main())
-    else:
-        asyncio.ensure_future(main())
+    main()
