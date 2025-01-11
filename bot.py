@@ -1,6 +1,7 @@
 # File: bot.py
 
 import os
+import asyncio
 import requests
 from telegram import (
     Update,
@@ -17,15 +18,12 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Free public upscaler endpoint (replace with a valid free endpoint if needed)
-FREE_UPSCALER_URL = "https://deepai.org/example-image-upscaling-api/image-upscale"  # Example
+FREE_UPSCALER_URL = "https://deepai.org/example-image-upscaling-api/image-upscale"
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
-# Global variables to track stats
 user_stats = set()
 image_count = 0
 
-# Start command handler
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global user_stats
     user_stats.add(update.effective_user.id)
@@ -48,7 +46,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
     await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
-# Help command handler
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     help_text = (
         "✨ <b>How to Use:</b>\n"
@@ -60,7 +57,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
-# Stats command handler
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global user_stats, image_count
     stats_message = (
@@ -71,7 +67,6 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
     await update.message.reply_text(stats_message, parse_mode=ParseMode.HTML)
 
-# Callback handler for inline buttons
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -79,7 +74,6 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if query.data == "help":
         await help_command(update, context)
 
-# Handler for photo messages
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     global user_stats, image_count
     user_stats.add(update.effective_user.id)
@@ -99,62 +93,35 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("✨ <i>Processing your image...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        # Step 1: Upscale the image using a free endpoint
         with open(photo_path, "rb") as image_file:
-            response = requests.post(
-                FREE_UPSCALER_URL,
-                files={"image": image_file}
-            )
+            response = requests.post(FREE_UPSCALER_URL, files={"image": image_file})
 
-        # Check if the upscaling was successful
         if response.status_code == 200 and "upscaled_image" in response.json():
             upscaled_image_url = response.json()["upscaled_image"]
-            # Download the upscaled image locally
             with open(upscaled_path, "wb") as f:
                 f.write(requests.get(upscaled_image_url).content)
         else:
-            await update.message.reply_text(
-                "⚠️ <i>Upscaling failed. Uploading the original image.</i>",
-                parse_mode=ParseMode.HTML,
-            )
+            await update.message.reply_text("⚠️ <i>Upscaling failed. Uploading the original image.</i>", parse_mode=ParseMode.HTML)
             upscaled_path = photo_path
 
-        # Step 2: Upload the processed image
         with open(upscaled_path, "rb") as image_file:
-            upload_response = requests.post(
-                UPLOAD_API_URL,
-                data={"reqtype": "fileupload"},
-                files={"fileToUpload": image_file}
-            )
+            upload_response = requests.post(UPLOAD_API_URL, data={"reqtype": "fileupload"}, files={"fileToUpload": image_file})
 
         if upload_response.status_code == 200 and upload_response.text.startswith("https://"):
             image_url = upload_response.text.strip()
-            await update.message.reply_text(
-                f"✅ <b>All done!</b>\n"
-                f"🔗 <a href='{image_url}'>Here’s your image link.</a>",
-                parse_mode=ParseMode.HTML,
-                disable_web_page_preview=False,
-            )
+            await update.message.reply_text(f"✅ <b>All done!</b>\n🔗 <a href='{image_url}'>Here’s your image link.</a>", parse_mode=ParseMode.HTML, disable_web_page_preview=False)
         else:
-            await update.message.reply_text(
-                "❌ <b>Failed to upload the image. Please try again later.</b>",
-                parse_mode=ParseMode.HTML,
-            )
+            await update.message.reply_text("❌ <b>Failed to upload the image. Please try again later.</b>", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(
-            f"❌ <b>An error occurred:</b> <i>{str(e)}</i>",
-            parse_mode=ParseMode.HTML,
-        )
+        await update.message.reply_text(f"❌ <b>An error occurred:</b> <i>{str(e)}</i>", parse_mode=ParseMode.HTML)
     finally:
         if os.path.exists(photo_path):
             os.remove(photo_path)
         if os.path.exists(upscaled_path) and upscaled_path != photo_path:
             os.remove(upscaled_path)
 
-# Main function
 async def main() -> None:
-    TELEGRAM_BOT_TOKEN = "7252535128:AAHDYgTVYOiuep7axsQh_Ay-lnKqUYPj6_c"
-
+    TELEGRAM_BOT_TOKEN = "7252535128:AAFRMJuZgwCOrO1_zeVSGGIfgCB0I5MwpJ0"
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
@@ -163,8 +130,14 @@ async def main() -> None:
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(CallbackQueryHandler(button_callback))
 
-    await application.run_polling()
+    await application.initialize()
+    await application.start()
+    print("Bot is running...")
+    await application.updater.start_polling()
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    if not loop.is_running():
+        loop.run_until_complete(main())
+    else:
+        asyncio.ensure_future(main())
