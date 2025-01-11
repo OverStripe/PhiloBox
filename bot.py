@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"  # File hosting API endpoint
-TOKEN = "7252535128:AAF27aG4j3PfIbkPvn4nJ6Zx7RvQ20LzBGo"
+TOKEN = "7252535128:AAGWthnsH9cbYnjjmqkLmlraIGeBrIdzdTA"
 
 # Database setup
 DB_FILE = "bot_stats.db"
@@ -69,20 +69,12 @@ def get_stats():
 
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler with enhanced UI."""
+    """Start command handler."""
     first_name = update.effective_user.first_name or "User"
 
-    # Inline buttons for quick actions
-    inline_keyboard = [
-        [InlineKeyboardButton("✨ Help", callback_data="help")],
-        [InlineKeyboardButton("🚀 Join Our Channel", url="https://t.me/TechPiroBots")],
-    ]
-    inline_markup = InlineKeyboardMarkup(inline_keyboard)
-
-    # Persistent reply keyboard for common actions
+    # Persistent reply keyboard
     reply_keyboard = [
         [KeyboardButton("/start"), KeyboardButton("/help"), KeyboardButton("/stats")],
-        [KeyboardButton("📸 Send an Image")],
     ]
     reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
@@ -95,12 +87,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         text=welcome_message,
-        reply_markup=inline_markup,
-        parse_mode=ParseMode.HTML,
-    )
-    await update.message.reply_text(
-        text="Use the buttons below to explore features or send a photo directly!",
         reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -140,13 +128,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Photo handler
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handles photo uploads and uploads them to the hosting API."""
+    """Auto processes and uploads photos."""
     user_id = update.effective_user.id
     update_user_stats(user_id)  # Update stats for the user
 
     message = update.message
     await message.reply_text(
-        text="✨ <i>Uploading your image...</i>",
+        text="✨ <i>Processing and uploading your image...</i>",
         parse_mode=ParseMode.HTML,
     )
 
@@ -191,16 +179,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             os.remove(photo_path)
 
 
-# Inline button handler
-async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback handler for inline buttons."""
-    query = update.callback_query
-    await query.answer()
-
-    if query.data == "help":
-        await help_command(update, context)
-
-
 # Main function
 def main():
     """Main function to start the bot."""
@@ -212,7 +190,6 @@ def main():
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    application.add_handler(CallbackQueryHandler(button_callback))
 
     # Start the bot
     application.run_polling()
