@@ -1,4 +1,7 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import os
+import aiohttp
+import sqlite3
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
@@ -9,40 +12,105 @@ from telegram.ext import (
     filters,
 )
 
-# Bot handlers
+UPLOAD_API_URL = "https://catbox.moe/user/api.php"  # File hosting API endpoint
+TOKEN = "7252535128:AAF27aG4j3PfIbkPvn4nJ6Zx7RvQ20LzBGo"
 
+# Database setup
+DB_FILE = "bot_stats.db"
+
+
+def initialize_db():
+    """Initialize the SQLite database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        """CREATE TABLE IF NOT EXISTS stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_count INTEGER DEFAULT 0,
+            image_count INTEGER DEFAULT 0
+        )"""
+    )
+    cursor.execute("INSERT OR IGNORE INTO stats (id, user_count, image_count) VALUES (1, 0, 0)")
+    conn.commit()
+    conn.close()
+
+
+def update_user_stats(user_id):
+    """Update the user stats in the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    # Update user count if it's a new user
+    cursor.execute("SELECT user_count FROM stats WHERE id = 1")
+    user_count = cursor.fetchone()[0]
+    cursor.execute("SELECT DISTINCT user_id FROM users WHERE user_id = ?", (user_id,))
+    if cursor.fetchone() is None:
+        user_count += 1
+        cursor.execute("UPDATE stats SET user_count = ? WHERE id = 1", (user_count,))
+
+    # Increment image count
+    cursor.execute("SELECT image_count FROM stats WHERE id = 1")
+    image_count = cursor.fetchone()[0] + 1
+    cursor.execute("UPDATE stats SET image_count = ? WHERE id = 1", (image_count,))
+
+    conn.commit()
+    conn.close()
+
+
+def get_stats():
+    """Retrieve the stats from the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_count, image_count FROM stats WHERE id = 1")
+    stats = cursor.fetchone()
+    conn.close()
+    return stats
+
+
+# Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Start command handler."""
+    """Start command handler with enhanced UI."""
     first_name = update.effective_user.first_name or "User"
-    keyboard = [
+
+    # Inline buttons for quick actions
+    inline_keyboard = [
         [InlineKeyboardButton("✨ Help", callback_data="help")],
         [InlineKeyboardButton("🚀 Join Our Channel", url="https://t.me/TechPiroBots")],
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    inline_markup = InlineKeyboardMarkup(inline_keyboard)
+
+    # Persistent reply keyboard for common actions
+    reply_keyboard = [
+        [KeyboardButton("/start"), KeyboardButton("/help"), KeyboardButton("/stats")],
+        [KeyboardButton("📸 Send an Image")],
+    ]
+    reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
     welcome_message = (
         f"👋 <b>Welcome, {first_name}!</b>\n\n"
-        f"📸 <i>Send me an image, and I’ll upscale and host it for you!</i>\n"
-        f"💡 <b>Features:</b>\n"
-        f"  - High-quality image upscaling\n"
-        f"  - Free hosting with instant links\n\n"
+        f"📸 <i>Send me an image, and I’ll host it for you online!</i>\n\n"
         f"👩‍💻 Developed by: @Philowise\n"
         f"⚡️ <i>Let’s get started!</i>"
     )
 
     await update.message.reply_text(
         text=welcome_message,
-        reply_markup=reply_markup,
+        reply_markup=inline_markup,
         parse_mode=ParseMode.HTML,
+    )
+    await update.message.reply_text(
+        text="Use the buttons below to explore features or send a photo directly!",
+        reply_markup=reply_markup,
     )
 
 
+# Help command
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler."""
     help_text = (
         "✨ <b>How to Use:</b>\n"
         "1️⃣ Send me an image.\n"
-        "2️⃣ I’ll enhance it and provide a shareable link.\n\n"
+        "2️⃣ I’ll upload it and provide you a shareable link.\n\n"
         "🔗 <b>Explore:</b>\n"
         "  - <a href='https://t.me/TechPiroBots'>More Bots</a>\n\n"
         "👩‍💻 <b>Contact:</b> @Philowise"
@@ -52,19 +120,78 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handle photo uploads."""
-    await update.message.reply_text(
-        text="✨ <i>Processing your image...</i>", parse_mode=ParseMode.HTML
+# Stats command
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show statistics about users and images processed."""
+    user_count, image_count = get_stats()
+
+    stats_message = (
+        f"📊 <b>Bot Statistics:</b>\n"
+        f"👥 <b>Total Users:</b> {user_count}\n"
+        f"🖼️ <b>Total Images Processed:</b> {image_count}\n\n"
+        f"Thank you for using the bot!"
     )
-    # Simulate processing steps
+
     await update.message.reply_text(
-        text="✅ <b>All done!</b>\n🔗 <a href='https://example.com/your-image'>Here’s your image link.</a>",
+        text=stats_message,
         parse_mode=ParseMode.HTML,
-        disable_web_page_preview=False,
     )
 
 
+# Photo handler
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handles photo uploads and uploads them to the hosting API."""
+    user_id = update.effective_user.id
+    update_user_stats(user_id)  # Update stats for the user
+
+    message = update.message
+    await message.reply_text(
+        text="✨ <i>Uploading your image...</i>",
+        parse_mode=ParseMode.HTML,
+    )
+
+    # Get the largest available image size
+    photo_file = await message.photo[-1].get_file()
+    photo_path = f"{photo_file.file_id}.jpg"
+
+    try:
+        # Download the photo
+        await photo_file.download_to_drive(photo_path)
+
+        # Upload the image to the hosting API
+        async with aiohttp.ClientSession() as session:
+            with open(photo_path, "rb") as file:
+                data = aiohttp.FormData()
+                data.add_field("reqtype", "fileupload")
+                data.add_field("fileToUpload", file, filename=photo_path)
+
+                async with session.post(UPLOAD_API_URL, data=data) as response:
+                    if response.status == 200:
+                        image_url = await response.text()
+                        if image_url.startswith("https://"):
+                            await message.reply_text(
+                                text=f"✅ <b>Upload successful!</b>\n🔗 <a href='{image_url.strip()}'>Here’s your link.</a>",
+                                parse_mode=ParseMode.HTML,
+                                disable_web_page_preview=False,
+                            )
+                        else:
+                            raise Exception("Unexpected response from the hosting service.")
+                    else:
+                        raise Exception("Failed to upload the file.")
+
+    except Exception as e:
+        await message.reply_text(
+            text=f"❌ <b>Failed to process your image:</b> <i>{e}</i>",
+            parse_mode=ParseMode.HTML,
+        )
+
+    finally:
+        # Clean up the downloaded photo
+        if os.path.exists(photo_path):
+            os.remove(photo_path)
+
+
+# Inline button handler
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Callback handler for inline buttons."""
     query = update.callback_query
@@ -77,11 +204,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 # Main function
 def main():
     """Main function to start the bot."""
-    application = ApplicationBuilder().token("7252535128:AAHD-MNhGTVNXyI5l8a_Y12R4KkQ4DERPmA").build()
+    initialize_db()  # Initialize the database
+    application = ApplicationBuilder().token(TOKEN).build()
 
     # Add handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     application.add_handler(CallbackQueryHandler(button_callback))
 
