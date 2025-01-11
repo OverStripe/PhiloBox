@@ -17,7 +17,7 @@ from telegram.ext import (
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
 # Telegram Bot Token
-TOKEN = "7252535128:AAGNX7X9js31iR79yx42pBjbCgWIfagVA3Y"
+TOKEN = "7252535128:AAGYfVDvl6QNVdIwXkKy7D0Uj6HxTr2teeY"
 
 # Database file
 DB_FILE = "bot_stats.db"
