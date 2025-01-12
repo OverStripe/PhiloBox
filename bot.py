@@ -1,7 +1,8 @@
 import os
 import logging
+import sqlite3
 import aiohttp
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, Dice
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InputFile
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
@@ -15,10 +16,57 @@ from telegram.ext import (
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
 # Telegram Bot Token
-TOKEN = "7681342049:AAFatyO1DdQE4mmHrGYKcG3lnmIfDY-WQeg"
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
+
+# Database setup
+DB_FILE = "bot_stats.db"
+
+
+def initialize_db():
+    """Initialize the database for storing user stats and images processed."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stats (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER UNIQUE,
+            images_processed INTEGER DEFAULT 0
+        )
+        """
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_user_stats(user_id):
+    """Update the stats for a user in the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR IGNORE INTO stats (user_id, images_processed) VALUES (?, 0)", (user_id,)
+    )
+    cursor.execute(
+        "UPDATE stats SET images_processed = images_processed + 1 WHERE user_id = ?",
+        (user_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_total_stats():
+    """Get total users and images processed from the database."""
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(user_id), SUM(images_processed) FROM stats")
+    stats = cursor.fetchone()
+    conn.close()
+    total_users = stats[0] if stats[0] else 0
+    total_images = stats[1] if stats[1] else 0
+    return total_users, total_images
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -31,33 +79,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     ]
     reply_markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
 
-    # Welcome message
+    # Welcome text
     welcome_message = (
-        f"👋 <b>Welcome, {first_name}!</b>\n\n"
-        f"📸 <i>Send me an image, and I’ll upload it for you!</i>\n\n"
-        f"⚙️ Use the buttons below to navigate.\n\n"
-        f"👩‍💻 Developed by: @Philowise\n"
-        f"⚡️ <i>Let’s get started!</i>"
+        f"👋 Welcome, {first_name}!\n\n"
+        f"📸 Send me an image, and I’ll upload it for you!\n\n"
+        f"🚀 Use the buttons below to navigate.\n\n"
+        f"👩‍💻 Developed by: @Philowise"
     )
 
-    await update.message.reply_text(
-        text=welcome_message,
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.HTML,
-    )
+    # Send image and welcome text
+    image_url = "https://files.catbox.moe/zscaaa.jpg"
+    await update.message.reply_photo(photo=image_url, caption=welcome_message, reply_markup=reply_markup)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Help command handler."""
     help_text = (
-        "✨ <b>How to Use:</b>\n"
+        "✨ How to Use:\n"
         "1️⃣ Send me an image.\n"
         "2️⃣ I’ll upload it and provide you with a shareable link.\n\n"
-        "⚙️ <b>Commands:</b>\n"
-        "• /start - Restart the bot.\n"
-        "• /help - Show this help message.\n"
-        "• /stats - View bot statistics.\n\n"
-        "👩‍💻 <b>Contact:</b> @Philowise"
+        "⚙️ Commands:\n"
+        "/start - Restart the bot\n"
+        "/help - Show this help message\n"
+        "/stats - View bot statistics\n\n"
+        "👩‍💻 Contact: @Philowise"
     )
     await update.message.reply_text(
         text=help_text, parse_mode=ParseMode.HTML, disable_web_page_preview=True
@@ -66,11 +111,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Stats command handler."""
-    await update.message.reply_dice(emoji="🎯")
+    total_users, total_images = get_total_stats()
     stats_message = (
-        f"📊 <b>Bot Statistics:</b>\n"
-        f"👥 <b>Total Users:</b> Feature not implemented yet.\n"
-        f"🖼️ <b>Total Images Processed:</b> Feature not implemented yet.\n\n"
+        f"📊 Bot Statistics:\n"
+        f"👥 Total Users: {total_users}\n"
+        f"🖼️ Total Images Processed: {total_images}\n\n"
         f"Thank you for using the bot!"
     )
     await update.message.reply_text(
@@ -81,11 +126,11 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process user-uploaded photos."""
+    user_id = update.effective_user.id
     message = update.message
 
     # Step 1: Acknowledge the received image
-    await message.reply_text("📸 <i>Image received! Uploading to Catbox...</i>", parse_mode=ParseMode.HTML)
-    await message.reply_dice(emoji="🎲")
+    await message.reply_text("📸 Image received! Uploading to Catbox...")
 
     # Step 2: Download the photo
     photo_file = await message.photo[-1].get_file()
@@ -94,6 +139,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         await photo_file.download_to_drive(photo_path)
         logging.info(f"Image downloaded to {photo_path}")
+
+        # Update user stats
+        update_user_stats(user_id)
 
         # Step 3: Upload the photo to Catbox
         async with aiohttp.ClientSession() as session:
@@ -107,10 +155,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     logging.info(f"API Response: {response_text}")
 
                     if response.status == 200 and response_text.startswith("https://"):
-                        # Step 4: Send the URL to the user with an animation
-                        await message.reply_dice(emoji="🎯")
+                        # Step 4: Send the URL to the user
                         await message.reply_text(
-                            text=f"✅ <b>Upload successful!</b>\n🔗 <a href='{response_text.strip()}'>Here’s your link.</a>",
+                            text=f"✅ Upload successful!\n🔗 <a href='{response_text.strip()}'>Here’s your link.</a>",
                             parse_mode=ParseMode.HTML,
                             disable_web_page_preview=False,
                         )
@@ -120,7 +167,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logging.error(f"Error processing photo: {e}")
         await message.reply_text(
-            text=f"❌ <b>Failed to process your image:</b> <i>{e}</i>",
+            text=f"❌ Failed to process your image: {e}",
             parse_mode=ParseMode.HTML,
         )
 
@@ -133,6 +180,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 def main():
     """Main entry point to run the bot."""
+    # Initialize database
+    initialize_db()
+
     application = ApplicationBuilder().token(TOKEN).build()
 
     # Add handlers
