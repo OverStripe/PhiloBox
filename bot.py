@@ -2,14 +2,13 @@ import os
 import logging
 import sqlite3
 import aiohttp
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ParseMode
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
-    CallbackQueryHandler,
     filters,
 )
 
@@ -78,13 +77,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Start command handler."""
     first_name = update.effective_user.first_name or "User"
 
-    # Inline and reply keyboard for better UI
+    # Inline buttons for quick navigation
     inline_keyboard = [
         [InlineKeyboardButton("✨ Help", callback_data="help")],
+        [InlineKeyboardButton("📊 Stats", callback_data="stats")],
         [InlineKeyboardButton("🚀 Join Channel", url="https://t.me/TechPiroBots")],
     ]
     inline_markup = InlineKeyboardMarkup(inline_keyboard)
 
+    # Reply keyboard for primary commands
     reply_keyboard = [
         [KeyboardButton("/help"), KeyboardButton("/stats")],
     ]
@@ -93,17 +94,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Welcome message
     welcome_message = (
         f"👋 <b>Welcome, {first_name}!</b>\n\n"
-        f"📸 <i>Send me an image, and I’ll host it for you online!</i>\n\n"
+        f"📸 <i>Send me an image, and I’ll process and host it for you!</i>\n\n"
         f"👩‍💻 Developed by: @Philowise\n"
         f"⚡️ <i>Let’s get started!</i>"
     )
 
-    # Send the welcome image and message
-    image_url = "https://files.catbox.moe/rcazxj.jpg"
-    await update.message.reply_photo(
-        photo=image_url,
-        caption=welcome_message,
+    await update.message.reply_text(
+        text=welcome_message,
+        reply_markup=reply_markup,
         parse_mode=ParseMode.HTML,
+    )
+
+    await update.message.reply_text(
+        text="🔽 Use the buttons below to explore features:",
         reply_markup=inline_markup,
     )
 
@@ -113,9 +116,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     help_text = (
         "✨ <b>How to Use:</b>\n"
         "1️⃣ Send me an image.\n"
-        "2️⃣ I’ll upload it and provide you with a shareable link.\n\n"
-        "🔗 <b>Explore:</b>\n"
-        "  - <a href='https://t.me/TechPiroBots'>More Bots</a>\n\n"
+        "2️⃣ I’ll process it and provide you with a shareable link.\n\n"
         "👩‍💻 <b>Contact:</b> @Philowise"
     )
     await update.message.reply_text(
@@ -141,22 +142,26 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Automatically process and upload user-uploaded photos."""
+    """Process and upload user-uploaded photos."""
     user_id = update.effective_user.id
-    update_user_stats(user_id)
-
     message = update.message
 
+    # Update user stats
+    update_user_stats(user_id)
+
     # Step 1: Acknowledge the received image
-    await message.reply_text("📸 <i>Image received! Processing...</i>", parse_mode=ParseMode.HTML)
+    await message.reply_text("📸 <i>Image received! Processing and uploading...</i>", parse_mode=ParseMode.HTML)
 
     # Step 2: Download and upload the photo
     photo_file = await message.photo[-1].get_file()
     photo_path = f"{photo_file.file_id}.jpg"
 
     try:
+        # Download the photo
         await photo_file.download_to_drive(photo_path)
+        logging.info(f"Image downloaded to {photo_path}")
 
+        # Upload the photo to the hosting API
         async with aiohttp.ClientSession() as session:
             with open(photo_path, "rb") as file:
                 data = aiohttp.FormData()
@@ -168,7 +173,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
                     logging.info(f"API Response: {response_text}")
 
                     if response.status == 200 and response_text.startswith("https://"):
-                        # Step 3: Send the URL after upload
+                        # Send the URL to the user
                         await message.reply_text(
                             text=f"✅ <b>Upload successful!</b>\n🔗 <a href='{response_text.strip()}'>Here’s your link.</a>",
                             parse_mode=ParseMode.HTML,
@@ -185,8 +190,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         )
 
     finally:
+        # Clean up the downloaded file
         if os.path.exists(photo_path):
             os.remove(photo_path)
+            logging.info(f"Temporary file {photo_path} removed.")
 
 
 def main():
