@@ -16,7 +16,7 @@ from telegram.ext import (
 UPLOAD_API_URL = "https://catbox.moe/user/api.php"
 
 # Telegram Bot Token
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+TOKEN = "7681342049:AAEnZgHp16kMhd40Nmiw1k1w0Lc6hdBmD0o"
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
